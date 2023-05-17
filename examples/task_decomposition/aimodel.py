@@ -1,9 +1,10 @@
-import openai
-import tiktoken
+import argparse
 import json
 import os
 import re
-import argparse
+
+import openai
+import tiktoken
 
 enc = tiktoken.get_encoding("cl100k_base")
 with open('../../secrets.json') as f:
