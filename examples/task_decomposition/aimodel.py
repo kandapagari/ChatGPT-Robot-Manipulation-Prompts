@@ -3,29 +3,34 @@ import json
 import os
 import re
 
+import dotenv
 import openai
 import tiktoken
 
+# load environment variables
+dotenv.load_dotenv(dotenv.find_dotenv())
+
 enc = tiktoken.get_encoding("cl100k_base")
-with open('../../secrets.json') as f:
+with open('secrets.json') as f:
     credentials = json.load(f)
 
-dir_system = './system'
-dir_prompt = './prompt'
-dir_query = './query'
-prompt_load_order = ['prompt_role',
-                     'prompt_function',
-                     'prompt_environment',
-                     'prompt_output_format',
-                     'prompt_example']
+dir_system = 'microsoft/robotManipulation/examples/task_decomposition/system'
+dir_prompt = 'microsoft/robotManipulation/examples/task_decomposition/prompt'
+dir_query = 'microsoft/robotManipulation/examples/task_decomposition/query'
+prompt_load_order = [
+    'prompt_role', 'prompt_function', 'prompt_environment',
+    'prompt_output_format', 'prompt_example'
+]
 
 
 class ChatGPT:
+
     def __init__(self, credentials, prompt_load_order):
-        openai.api_key = credentials["chatengine"]["AZURE_OPENAI_KEY"]
-        openai.api_base = credentials["chatengine"]["AZURE_OPENAI_ENDPOINT"]
-        openai.api_type = 'azure'
-        openai.api_version = '2022-12-01'
+        openai.api_key = os.environ["OPENAI_API_KEY"]
+        # credentials["chatengine"]["AZURE_OPENAI_KEY"]
+        # openai.api_base = credentials["chatengine"]["AZURE_OPENAI_ENDPOINT"]
+        # openai.api_type = 'azure'
+        # openai.api_version = '2022-12-01'
         self.credentials = credentials
         self.messages = []
         self.max_token_length = 8000
@@ -57,7 +62,7 @@ class ChatGPT:
                 else:
                     self.messages.append({"sender": "assistant", "text": item})
         for message in self.messages:
-            self.system_prompt += f"\n<|im_start|>{message['sender']}\n{message['text']}\n<|im_end|>"
+            self.system_prompt += f"\n<|im_start|>{message['sender']}\n{message['text']}\n<|im_end|>"  # NOQA
         self.messages = []
         fp_query = os.path.join(dir_query, 'query.txt')
         with open(fp_query) as f:
@@ -86,12 +91,14 @@ class ChatGPT:
         # skip if there is no json part
         if text.find('```') == -1:
             return text
-        text_json = text[text.find(
-            '```') + 3:text.find('```', text.find('```') + 3)]
+        text_json = text[text.find('```') +
+                         3:text.find('```',
+                                     text.find('```') + 3)]
         return text_json
 
     def generate(self, message, environment, is_user_feedback=False):
-        deployment_name = self.credentials["chatengine"]["AZURE_OPENAI_DEPLOYMENT_NAME_CHATGPT"]
+        # deployment_name = self.credentials["chatengine"][
+        #     "AZURE_OPENAI_DEPLOYMENT_NAME_CHATGPT"]
         # Remove unsafe user inputs. May need further refinement in the future.
         if message.find('<|im_start|>') != -1:
             message = message.replace('<|im_start|>', '')
@@ -99,20 +106,23 @@ class ChatGPT:
             message = message.replace('<|im_end|>', '')
 
         if is_user_feedback:
-            self.messages.append({'sender': 'user',
-                                  'text': message + "\n" + self.instruction})
+            self.messages.append({
+                'sender': 'user',
+                'text': message + "\n" + self.instruction
+            })
         else:
             text_base = self.query
             if text_base.find('[ENVIRONMENT]') != -1:
-                text_base = text_base.replace(
-                    '[ENVIRONMENT]', json.dumps(environment))
+                text_base = text_base.replace('[ENVIRONMENT]',
+                                              json.dumps(environment))
             if text_base.find('[INSTRUCTION]') != -1:
                 text_base = text_base.replace('[INSTRUCTION]', message)
                 self.instruction = text_base
             self.messages.append({'sender': 'user', 'text': text_base})
 
         response = openai.Completion.create(
-            engine=deployment_name,
+            # engine=deployment_name,
+            model="text-davinci-003",
             prompt=self.create_prompt(),
             temperature=0.1,
             max_tokens=self.max_completion_length,
@@ -137,8 +147,10 @@ class ChatGPT:
             pdb.set_trace()
 
         if len(self.messages) > 0 and self.last_response is not None:
-            self.messages.append(
-                {"sender": "assistant", "text": self.last_response})
+            self.messages.append({
+                "sender": "assistant",
+                "text": self.last_response
+            })
 
         return self.json_dict
 
@@ -152,96 +164,102 @@ class ChatGPT:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--scenario',
-        type=str,
-        required=True,
-        help='scenario name (see the code for details)')
+    parser.add_argument('--scenario',
+                        type=str,
+                        required=True,
+                        help='scenario name (see the code for details)')
     args = parser.parse_args()
     scenario_name = args.scenario
     # 1. example of moving objects on the table and the shelf
     if scenario_name == 'shelf':
         environment = {
             "assets": [
-                "<table>",
-                "<shelf_bottom>",
-                "<shelf_top>",
-                "<trash_bin>",
-                "floor>"],
+                "<table>", "<shelf_bottom>", "<shelf_top>", "<trash_bin>",
+                "floor>"
+            ],
             "asset_states": {
                 "<shelf_bottom>": "on_something(<table>)",
-                "<trash_bin>": "on_something(<floor>)"},
-            "objects": [
-                "<spam>",
-                "<juice>"],
+                "<trash_bin>": "on_something(<floor>)"
+            },
+            "objects": ["<spam>", "<juice>"],
             "object_states": {
                 "<spam>": "on_something(<table>)",
-                "<juice>": "on_something(<shelf_bottom>)"}}
-        instructions = ['Put the juice on top of the shelf',
-                        'Throw away the spam into the trash bin',
-                        'Move the juice on top of the table',
-                        'Throw away the juice']
+                "<juice>": "on_something(<shelf_bottom>)"
+            }
+        }
+        instructions = [
+            'Put the juice on top of the shelf',
+            'Throw away the spam into the trash bin',
+            'Move the juice on top of the table', 'Throw away the juice'
+        ]
     # 2. example of opening and closing the fridge, and putting the juice on
     # the floor
     elif scenario_name == 'fridge':
         environment = {
-            "assets": [
-                "<fridge>",
-                "<floor>"],
+            "assets": ["<fridge>", "<floor>"],
             "asset_states": {
-                "<fridge>": "on_something(<floor>)"},
-            "objects": [
-                "<fridge_handle>",
-                "<juice>"],
+                "<fridge>": "on_something(<floor>)"
+            },
+            "objects": ["<fridge_handle>", "<juice>"],
             "object_states": {
                 "<fridge_handle>": "closed()",
-                "<juice>": "inside_something(<fridge>)"}}
-        instructions = ['Open the fridge half way',
-                        'Open the fridge wider',
-                        'Take the juice in the fridge and put it on the floor',
-                        'Close the fridge']
+                "<juice>": "inside_something(<fridge>)"
+            }
+        }
+        instructions = [
+            'Open the fridge half way', 'Open the fridge wider',
+            'Take the juice in the fridge and put it on the floor',
+            'Close the fridge'
+        ]
     # 3. example of opening and closing the drawer
     elif scenario_name == 'drawer':
-        environment = {"assets": ["<drawer>", "<floor>"],
-                       "asset_states": {"<drawer>": "on_something(<floor>)"},
-                       "objects": ["<drawer_handle>"],
-                       "object_states": {"<drawer_handle>": "closed()"}}
-        instructions = ['Open the drawer widely',
-                        'Close the drawer half way',
-                        'Close the drawer fully']
+        environment = {
+            "assets": ["<drawer>", "<floor>"],
+            "asset_states": {
+                "<drawer>": "on_something(<floor>)"
+            },
+            "objects": ["<drawer_handle>"],
+            "object_states": {
+                "<drawer_handle>": "closed()"
+            }
+        }
+        instructions = [
+            'Open the drawer widely', 'Close the drawer half way',
+            'Close the drawer fully'
+        ]
     # 4. example of wiping the table
     elif scenario_name == 'table':
         environment = {
-            "assets": [
-                "<table1>",
-                "<table2>",
-                "<trash_bin>",
-                "<floor>"],
+            "assets": ["<table1>", "<table2>", "<trash_bin>", "<floor>"],
             "asset_states": {
                 "<table1>": "next_to(<table2>)",
-                "<trash_bin>": "on_something(<floor>)"},
+                "<trash_bin>": "on_something(<floor>)"
+            },
             "objects": ["<sponge>"],
             "object_states": {
-                "<sponge>": "on_something(<table1>)"}}
-        instructions = ['Put the sponge on the table2',
-                        'Wipe the table2 with the sponge']
+                "<sponge>": "on_something(<table1>)"
+            }
+        }
+        instructions = [
+            'Put the sponge on the table2', 'Wipe the table2 with the sponge'
+        ]
     # 5. example of wiping the window
     elif scenario_name == 'window':
         environment = {
-            "assets": [
-                "<table>",
-                "<window>",
-                "<trash_bin>",
-                "<floor>"],
+            "assets": ["<table>", "<window>", "<trash_bin>", "<floor>"],
             "asset_states": {
                 "<table>": "next_to(<window>)",
-                "<trash_bin>": "on_something(<floor>)"},
+                "<trash_bin>": "on_something(<floor>)"
+            },
             "objects": ["<sponge>"],
             "object_states": {
-                "<sponge>": "on_something(<table>)"}}
+                "<sponge>": "on_something(<table>)"
+            }
+        }
         instructions = [
             'Get the sponge from the table and wipe the window with it. After that, put the sponge back on the table',
-            'Throw away the sponge on the table']
+            'Throw away the sponge on the table'
+        ]
     else:
         parser.error('Invalid scenario name:' + scenario_name)
 
@@ -251,18 +269,18 @@ if __name__ == "__main__":
         os.makedirs('./out/' + scenario_name)
     for i, instruction in enumerate(instructions):
         print(json.dumps(environment))
-        text = aimodel.generate(
-            instruction,
-            environment,
-            is_user_feedback=False)
+        text = aimodel.generate(instruction,
+                                environment,
+                                is_user_feedback=False)
         while True:
             user_feedback = input(
                 'user feedback (return empty if satisfied): ')
             if user_feedback == 'q':
                 exit()
             if user_feedback != '':
-                text = aimodel.generate(
-                    user_feedback, environment, is_user_feedback=True)
+                text = aimodel.generate(user_feedback,
+                                        environment,
+                                        is_user_feedback=True)
             else:
                 # update the current environment
                 environment = aimodel.environment

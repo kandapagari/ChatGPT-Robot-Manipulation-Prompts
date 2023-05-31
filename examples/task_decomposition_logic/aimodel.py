@@ -3,29 +3,34 @@ import json
 import os
 import re
 
+import dotenv
 import openai
 import tiktoken
 
+# load environment variables
+dotenv.load_dotenv(dotenv.find_dotenv())
+
 enc = tiktoken.get_encoding("cl100k_base")
-with open('../../secrets.json') as f:
+with open('secrets.json') as f:
     credentials = json.load(f)
 
-dir_system = './system'
-dir_prompt = './prompt'
-dir_query = './query'
-prompt_load_order = ['prompt_role',
-                     'prompt_function',
-                     'prompt_environment',
-                     'prompt_output_format',
-                     'prompt_example']
+dir_system = 'microsoft/robotManipulation/examples/task_decomposition_logic/system'
+dir_prompt = 'microsoft/robotManipulation/examples/task_decomposition_logic/prompt'
+dir_query = 'microsoft/robotManipulation/examples/task_decomposition_logic/query'
+prompt_load_order = [
+    'prompt_role', 'prompt_function', 'prompt_environment',
+    'prompt_output_format', 'prompt_example'
+]
 
 
 class ChatGPT:
+
     def __init__(self, credentials, prompt_load_order):
-        openai.api_key = credentials["chatengine"]["AZURE_OPENAI_KEY"]
-        openai.api_base = credentials["chatengine"]["AZURE_OPENAI_ENDPOINT"]
-        openai.api_type = 'azure'
-        openai.api_version = '2022-12-01'
+        openai.api_key = os.environ["OPENAI_API_KEY"]
+        # openai.api_key = credentials["chatengine"]["AZURE_OPENAI_KEY"]
+        # openai.api_base = credentials["chatengine"]["AZURE_OPENAI_ENDPOINT"]
+        # openai.api_type = 'azure'
+        # openai.api_version = '2022-12-01'
         self.credentials = credentials
         self.messages = []
         self.max_token_length = 8000
@@ -85,12 +90,14 @@ class ChatGPT:
         # skip if there is no json part
         if text.find('```') == -1:
             return text
-        text_json = text[text.find(
-            '```') + 3:text.find('```', text.find('```') + 3)]
+        text_json = text[text.find('```') +
+                         3:text.find('```',
+                                     text.find('```') + 3)]
         return text_json
 
     def generate(self, message, environment, is_user_feedback=False):
-        deployment_name = self.credentials["chatengine"]["AZURE_OPENAI_DEPLOYMENT_NAME_CHATGPT"]
+        deployment_name = self.credentials["chatengine"][
+            "AZURE_OPENAI_DEPLOYMENT_NAME_CHATGPT"]
         # Remove unsafe user inputs. May need further refinement in the future.
         if message.find('<|im_start|>') != -1:
             message = message.replace('<|im_start|>', '')
@@ -98,20 +105,23 @@ class ChatGPT:
             message = message.replace('<|im_end|>', '')
 
         if is_user_feedback:
-            self.messages.append({'sender': 'user',
-                                  'text': message + "\n" + self.instruction})
+            self.messages.append({
+                'sender': 'user',
+                'text': message + "\n" + self.instruction
+            })
         else:
             text_base = self.query
             if text_base.find('[ENVIRONMENT]') != -1:
-                text_base = text_base.replace(
-                    '[ENVIRONMENT]', json.dumps(environment))
+                text_base = text_base.replace('[ENVIRONMENT]',
+                                              json.dumps(environment))
             if text_base.find('[INSTRUCTION]') != -1:
                 text_base = text_base.replace('[INSTRUCTION]', message)
                 self.instruction = text_base
             self.messages.append({'sender': 'user', 'text': text_base})
 
         response = openai.Completion.create(
-            engine=deployment_name,
+            # engine=deployment_name,
+            model="text-davinci-003",
             prompt=self.create_prompt(),
             temperature=0.1,
             max_tokens=self.max_completion_length,
@@ -136,8 +146,10 @@ class ChatGPT:
             pdb.set_trace()
 
         if len(self.messages) > 0 and self.last_response is not None:
-            self.messages.append(
-                {"sender": "assistant", "text": self.last_response})
+            self.messages.append({
+                "sender": "assistant",
+                "text": self.last_response
+            })
 
         return self.json_dict
 
@@ -151,11 +163,10 @@ class ChatGPT:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--scenario',
-        type=str,
-        required=True,
-        help='scenario name (see the code for details)')
+    parser.add_argument('--scenario',
+                        type=str,
+                        required=True,
+                        help='scenario name (see the code for details)')
     args = parser.parse_args()
     scenario_name = args.scenario
     # Logic
@@ -163,22 +174,22 @@ if __name__ == "__main__":
     if scenario_name == 'shelf':
         environment = {
             "assets": [
-                "<table>",
-                "<shelf_bottom>",
-                "<shelf_top>",
-                "<trash_bin>",
-                "<floor>"],
+                "<table>", "<shelf_bottom>", "<shelf_top>", "<trash_bin>",
+                "<floor>"
+            ],
             "asset_states": {
                 "<shelf_bottom>": "on_something(<table>)",
-                "<trash_bin>": "on_something(<floor>)"},
-            "objects": [
-                "<spam>",
-                "<juice>"],
+                "<trash_bin>": "on_something(<floor>)"
+            },
+            "objects": ["<spam>", "<juice>"],
             "object_states": {
                 "<spam>": "on_something(<table>)",
-                "<juice>": "on_something(<shelf_bottom>)"}}
+                "<juice>": "on_something(<shelf_bottom>)"
+            }
+        }
         instructions = [
-            'Take the spam, and throw it away if the our-of-date date is expired. Otherwise, put it on the shelf.']
+            'Take the spam, and throw it away if the our-of-date date is expired. Otherwise, put it on the shelf.'
+        ]
     else:
         parser.error('Invalid scenario name:' + scenario_name)
 
@@ -188,18 +199,18 @@ if __name__ == "__main__":
         os.makedirs('./out/' + scenario_name)
     for i, instruction in enumerate(instructions):
         print(json.dumps(environment))
-        text = aimodel.generate(
-            instruction,
-            environment,
-            is_user_feedback=False)
+        text = aimodel.generate(instruction,
+                                environment,
+                                is_user_feedback=False)
         while True:
             user_feedback = input(
                 'user feedback (return empty if satisfied): ')
             if user_feedback == 'q':
                 exit()
             if user_feedback != '':
-                text = aimodel.generate(
-                    user_feedback, environment, is_user_feedback=True)
+                text = aimodel.generate(user_feedback,
+                                        environment,
+                                        is_user_feedback=True)
             else:
                 # For this example, you need to update the environment on site.
                 environment = environment
